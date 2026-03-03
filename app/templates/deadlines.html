@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-bold text-gray-900 mb-6">Upcoming Deadlines</h1>
+
+{% if overdue %}
+<!-- Overdue section -->
+<div class="mb-8">
+  <h2 class="text-sm font-semibold text-red-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+    <span class="h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>
+    Overdue ({{ overdue|length }})
+  </h2>
+  <div class="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-red-100 text-sm">
+        <thead class="bg-red-50">
+          <tr>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">Due Date</th>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">Days Overdue</th>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">Client</th>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">PAN</th>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">AY</th>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">Section</th>
+            <th class="px-4 py-3 text-left font-semibold text-red-700">Type</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-red-50">
+          {% for p in overdue %}
+          <tr class="hover:bg-red-50/50 transition-colors">
+            <td class="px-4 py-3 font-medium text-red-800">{{ p.response_due_date.strftime('%d %b %Y') }}</td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold bg-red-100 text-red-800">
+                {{ -p.days_until_due }}d overdue
+              </span>
+            </td>
+            <td class="px-4 py-3"><a href="/clients/{{ p.pan }}" class="text-brand-600 hover:underline">{{ p.client.name }}</a></td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-500">{{ p.pan }}</td>
+            <td class="px-4 py-3">{{ p.assessment_year }}</td>
+            <td class="px-4 py-3 font-medium">{{ p.section }}</td>
+            <td class="px-4 py-3">{{ p.notice_type }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Upcoming section -->
+<div>
+  <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
+    Upcoming ({{ upcoming|length }})
+  </h2>
+  {% if upcoming %}
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">Due Date</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">Days Left</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">Client</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">PAN</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">AY</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">Section</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">Type</th>
+            <th class="px-4 py-3 text-left font-semibold text-gray-600">Urgency</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for p in upcoming %}
+          <tr class="hover:bg-gray-50 transition-colors">
+            <td class="px-4 py-3 font-medium">{{ p.response_due_date.strftime('%d %b %Y') if p.response_due_date else '—' }}</td>
+            <td class="px-4 py-3">
+              {% if p.days_until_due == 0 %}
+                <span class="text-red-600 font-bold">Today</span>
+              {% elif p.days_until_due is not none %}
+                {{ p.days_until_due }}d
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3"><a href="/clients/{{ p.pan }}" class="text-brand-600 hover:underline">{{ p.client.name }}</a></td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-500">{{ p.pan }}</td>
+            <td class="px-4 py-3">{{ p.assessment_year }}</td>
+            <td class="px-4 py-3 font-medium">{{ p.section }}</td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700">{{ p.notice_type }}</span>
+            </td>
+            <td class="px-4 py-3">
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                {% if p.urgency == 'critical' %}bg-red-100 text-red-800
+                {% elif p.urgency == 'high' %}bg-orange-100 text-orange-800
+                {% elif p.urgency == 'medium' %}bg-yellow-100 text-yellow-800
+                {% else %}bg-green-100 text-green-800{% endif %}">
+                {{ p.urgency }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-gray-400">
+    No upcoming deadlines
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

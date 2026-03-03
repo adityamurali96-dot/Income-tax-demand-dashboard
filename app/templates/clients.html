@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-bold text-gray-900 mb-6">Clients</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  {% for c in clients %}
+  <a href="/clients/{{ c.pan }}" class="block bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:border-brand-300 hover:shadow transition-all">
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-sm font-semibold text-gray-900">{{ c.name }}</p>
+        <p class="text-xs font-mono text-gray-400 mt-0.5">{{ c.pan }}</p>
+      </div>
+      {% if c.open_proceedings_count > 0 %}
+      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
+        {{ c.open_proceedings_count }} open
+      </span>
+      {% endif %}
+    </div>
+    <div class="mt-4 flex items-center justify-between text-xs text-gray-500">
+      <span>Proceedings: {{ c.proceedings|length }}</span>
+      <span>Demands: {{ c.total_demand_amount|inr }}</span>
+    </div>
+    {% if c.last_synced %}
+    <p class="text-xs text-gray-400 mt-2">Last synced: {{ c.last_synced.strftime('%d %b %Y %H:%M') }}</p>
+    {% endif %}
+  </a>
+  {% else %}
+  <div class="col-span-full bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-gray-400">
+    No clients yet
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

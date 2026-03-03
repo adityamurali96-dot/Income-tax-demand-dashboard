@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
+  <h1 class="text-xl font-bold text-gray-900">All Proceedings</h1>
+  <!-- Filters -->
+  <form method="get" class="flex flex-wrap items-center gap-2">
+    <select name="status" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm focus:ring-brand-500 focus:border-brand-500">
+      <option value="">All Statuses</option>
+      {% for s in all_statuses %}<option value="{{ s }}" {% if s == current_status %}selected{% endif %}>{{ s|capitalize }}</option>{% endfor %}
+    </select>
+    <select name="ay" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm focus:ring-brand-500 focus:border-brand-500">
+      <option value="">All AYs</option>
+      {% for a in all_ays %}<option value="{{ a }}" {% if a == current_ay %}selected{% endif %}>{{ a }}</option>{% endfor %}
+    </select>
+    <input name="pan" placeholder="PAN" value="{{ current_pan }}" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm w-28 focus:ring-brand-500 focus:border-brand-500">
+    <select name="sort" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm focus:ring-brand-500 focus:border-brand-500">
+      <option value="due_date" {% if current_sort == 'due_date' %}selected{% endif %}>Due Date</option>
+      <option value="ay_desc" {% if current_sort == 'ay_desc' %}selected{% endif %}>AY (newest)</option>
+      <option value="ay_asc" {% if current_sort == 'ay_asc' %}selected{% endif %}>AY (oldest)</option>
+      <option value="date_issued" {% if current_sort == 'date_issued' %}selected{% endif %}>Date Issued</option>
+    </select>
+    <button type="submit" class="rounded-md bg-brand-600 text-white text-sm py-1.5 px-4 hover:bg-brand-700 shadow-sm">Filter</button>
+    {% if current_status or current_ay or current_pan %}
+    <a href="/proceedings" class="text-xs text-gray-500 hover:text-gray-700 underline">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Client</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">PAN</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">AY</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Section</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Type</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Issued</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Due Date</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Urgency</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for p in proceedings %}
+        <tr class="hover:bg-gray-50 transition-colors">
+          <td class="px-4 py-3">
+            <a href="/clients/{{ p.pan }}" class="text-brand-600 hover:underline font-medium">{{ p.client.name }}</a>
+          </td>
+          <td class="px-4 py-3 font-mono text-xs text-gray-500">{{ p.pan }}</td>
+          <td class="px-4 py-3">{{ p.assessment_year }}</td>
+          <td class="px-4 py-3 font-medium">{{ p.section }}</td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700">{{ p.notice_type }}</span>
+          </td>
+          <td class="px-4 py-3 text-gray-500">{{ p.date_of_issue.strftime('%d %b %Y') if p.date_of_issue else '—' }}</td>
+          <td class="px-4 py-3 text-gray-500">{{ p.response_due_date.strftime('%d %b %Y') if p.response_due_date else '—' }}</td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if p.status == 'pending' %}bg-amber-100 text-amber-800
+              {% elif p.status == 'responded' %}bg-blue-100 text-blue-800
+              {% elif p.status == 'closed' %}bg-green-100 text-green-800
+              {% else %}bg-purple-100 text-purple-800{% endif %}">
+              {{ p.status }}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            {% if p.urgency != 'none' %}
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if p.urgency == 'critical' %}bg-red-100 text-red-800
+              {% elif p.urgency == 'high' %}bg-orange-100 text-orange-800
+              {% elif p.urgency == 'medium' %}bg-yellow-100 text-yellow-800
+              {% else %}bg-green-100 text-green-800{% endif %}">
+              {% if p.days_until_due is not none and p.days_until_due < 0 %}{{ -p.days_until_due }}d overdue
+              {% elif p.days_until_due == 0 %}Today
+              {% elif p.days_until_due is not none %}{{ p.days_until_due }}d
+              {% endif %}
+            </span>
+            {% else %}<span class="text-gray-300">—</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="px-4 py-12 text-center text-gray-400">No proceedings found</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
+    Showing {{ proceedings|length }} proceeding{{ 's' if proceedings|length != 1 }}
+  </div>
+</div>
+{% endblock %}

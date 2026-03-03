@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
+  <div>
+    <h1 class="text-xl font-bold text-gray-900">Outstanding Demands</h1>
+    <p class="text-sm text-gray-500 mt-1">Total outstanding: <span class="font-semibold text-gray-800">{{ total|inr }}</span></p>
+  </div>
+  <form method="get" class="flex flex-wrap items-center gap-2">
+    <select name="status" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm">
+      <option value="">All Statuses</option>
+      {% for s in all_statuses %}<option value="{{ s }}" {% if s == current_status %}selected{% endif %}>{{ s|capitalize }}</option>{% endfor %}
+    </select>
+    <select name="ay" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm">
+      <option value="">All AYs</option>
+      {% for a in all_ays %}<option value="{{ a }}" {% if a == current_ay %}selected{% endif %}>{{ a }}</option>{% endfor %}
+    </select>
+    <select name="sort" class="rounded-md border-gray-300 bg-white text-sm py-1.5 px-3 shadow-sm">
+      <option value="amount_desc" {% if current_sort == 'amount_desc' %}selected{% endif %}>Amount (high to low)</option>
+      <option value="amount_asc" {% if current_sort == 'amount_asc' %}selected{% endif %}>Amount (low to high)</option>
+      <option value="ay_desc" {% if current_sort == 'ay_desc' %}selected{% endif %}>AY (newest)</option>
+    </select>
+    <button type="submit" class="rounded-md bg-brand-600 text-white text-sm py-1.5 px-4 hover:bg-brand-700 shadow-sm">Filter</button>
+    {% if current_status or current_ay %}
+    <a href="/demands" class="text-xs text-gray-500 hover:text-gray-700 underline">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Client</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">PAN</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">AY</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Section</th>
+          <th class="px-4 py-3 text-right font-semibold text-gray-600">Demand</th>
+          <th class="px-4 py-3 text-right font-semibold text-gray-600">Interest</th>
+          <th class="px-4 py-3 text-right font-semibold text-gray-600">Total</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">AO</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Priority</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for d in demands %}
+        <tr class="hover:bg-gray-50 transition-colors">
+          <td class="px-4 py-3"><a href="/clients/{{ d.pan }}" class="text-brand-600 hover:underline font-medium">{{ d.client.name }}</a></td>
+          <td class="px-4 py-3 font-mono text-xs text-gray-500">{{ d.pan }}</td>
+          <td class="px-4 py-3">{{ d.assessment_year }}</td>
+          <td class="px-4 py-3 font-medium">{{ d.section }}</td>
+          <td class="px-4 py-3 text-right font-mono">{{ d.demand_amount|inr }}</td>
+          <td class="px-4 py-3 text-right font-mono text-gray-500">{{ d.interest_amount|inr }}</td>
+          <td class="px-4 py-3 text-right font-mono font-semibold">{{ d.total_amount|inr }}</td>
+          <td class="px-4 py-3 text-xs text-gray-500">
+            {{ d.ao_name or '—' }}
+            {% if d.ao_jurisdiction %}<br><span class="text-gray-400">{{ d.ao_jurisdiction }}</span>{% endif %}
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if d.status == 'outstanding' %}bg-red-100 text-red-700
+              {% elif d.status == 'disputed' %}bg-purple-100 text-purple-700
+              {% elif d.status == 'partially_paid' %}bg-yellow-100 text-yellow-700
+              {% elif d.status == 'paid' %}bg-green-100 text-green-700
+              {% else %}bg-gray-100 text-gray-600{% endif %}">
+              {{ d.status }}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if d.urgency_level == 'critical' %}bg-red-100 text-red-800
+              {% elif d.urgency_level == 'high' %}bg-orange-100 text-orange-800
+              {% elif d.urgency_level == 'medium' %}bg-yellow-100 text-yellow-800
+              {% else %}bg-green-100 text-green-800{% endif %}">
+              {{ d.urgency_level }}
+            </span>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="px-4 py-12 text-center text-gray-400">No demands found</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
+    Showing {{ demands|length }} demand{{ 's' if demands|length != 1 }}
+  </div>
+</div>
+{% endblock %}
