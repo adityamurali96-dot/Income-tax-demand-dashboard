@@ -8,6 +8,8 @@ from sqlalchemy import func, case, text
 
 from contextlib import asynccontextmanager
 
+import logging
+
 from app.config import APP_TITLE
 from app.database import engine, Base, get_db
 from app.models import Client, Proceeding, Demand, SyncLog, NoticeFile, NoticeParsed
@@ -15,18 +17,24 @@ from app.api import router as api_router
 
 from datetime import date, timedelta
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 
-Base.metadata.create_all(bind=engine)
-
 
 @asynccontextmanager
 async def lifespan(app):
-    # Seed demo data on startup (idempotent — skips if data already exists)
-    from app.seed import seed
-    seed()
+    # Create tables and seed demo data on startup.
+    # Wrapped in try/except so the app still starts (and serves /health)
+    # even if the database isn't ready yet.
+    try:
+        Base.metadata.create_all(bind=engine)
+        from app.seed import seed
+        seed()
+    except Exception:
+        logger.exception("Database initialisation failed — app will start without data")
     yield
 
 
