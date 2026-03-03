@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-bold text-gray-900 mb-6">Sync Log</h1>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Completed</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">PAN</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Sync Type</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Records Found</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">New</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Changed</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Status</th>
+          <th class="px-4 py-3 text-left font-semibold text-gray-600">Errors</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for l in logs %}
+        <tr class="hover:bg-gray-50 transition-colors">
+          <td class="px-4 py-3 text-gray-500">
+            {{ l.completed_at.strftime('%d %b %Y %H:%M') if l.completed_at else '—' }}
+            {% if l.started_at and l.completed_at %}
+            <br><span class="text-xs text-gray-400">{{ ((l.completed_at - l.started_at).total_seconds()|int) }}s</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 font-mono text-xs">
+            <a href="/clients/{{ l.pan }}" class="text-brand-600 hover:underline">{{ l.pan }}</a>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if l.sync_type == 'excel_export' %}bg-blue-50 text-blue-700
+              {% elif l.sync_type == 'notice_download' %}bg-purple-50 text-purple-700
+              {% else %}bg-teal-50 text-teal-700{% endif %}">
+              {{ l.sync_type }}
+            </span>
+          </td>
+          <td class="px-4 py-3">{{ l.records_found }}</td>
+          <td class="px-4 py-3">{{ l.records_new }}</td>
+          <td class="px-4 py-3">{{ l.records_changed }}</td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+              {% if l.status == 'success' %}bg-green-100 text-green-700
+              {% elif l.status == 'partial' %}bg-yellow-100 text-yellow-700
+              {% else %}bg-red-100 text-red-700{% endif %}">
+              {{ l.status }}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{{ l.errors or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="px-4 py-12 text-center text-gray-400">No sync logs yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
+    Showing {{ logs|length }} log entr{{ 'y' if logs|length == 1 else 'ies' }}
+  </div>
+</div>
+{% endblock %}

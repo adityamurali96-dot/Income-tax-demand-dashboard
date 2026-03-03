@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }} — IT Demand Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    /* Subtle scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .badge-critical { @apply bg-red-100 text-red-800 }
+    .badge-high { @apply bg-orange-100 text-orange-800 }
+    .badge-medium { @apply bg-yellow-100 text-yellow-800 }
+    .badge-low { @apply bg-green-100 text-green-800 }
+    .badge-none { @apply bg-gray-100 text-gray-600 }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 800:'#1e40af' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="h-full">
+  <div class="min-h-full">
+    <!-- Navigation -->
+    <nav class="bg-white border-b border-gray-200 shadow-sm">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="flex h-16 items-center justify-between">
+          <div class="flex items-center gap-2">
+            <a href="/" class="flex items-center gap-2">
+              <div class="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center">
+                <span class="text-white font-bold text-sm">IT</span>
+              </div>
+              <span class="text-lg font-semibold text-gray-900">Demand Dashboard</span>
+            </a>
+          </div>
+          <div class="hidden md:flex items-center gap-1">
+            <a href="/" class="px-3 py-2 rounded-md text-sm font-medium {% if request.url.path == '/' %}bg-brand-50 text-brand-700{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">Overview</a>
+            <a href="/proceedings" class="px-3 py-2 rounded-md text-sm font-medium {% if '/proceedings' in request.url.path %}bg-brand-50 text-brand-700{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">Proceedings</a>
+            <a href="/deadlines" class="px-3 py-2 rounded-md text-sm font-medium {% if '/deadlines' in request.url.path %}bg-brand-50 text-brand-700{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">Deadlines</a>
+            <a href="/demands" class="px-3 py-2 rounded-md text-sm font-medium {% if '/demands' in request.url.path %}bg-brand-50 text-brand-700{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">Demands</a>
+            <a href="/clients" class="px-3 py-2 rounded-md text-sm font-medium {% if '/clients' in request.url.path %}bg-brand-50 text-brand-700{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">Clients</a>
+            <a href="/sync-log" class="px-3 py-2 rounded-md text-sm font-medium {% if '/sync-log' in request.url.path %}bg-brand-50 text-brand-700{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900{% endif %}">Sync Log</a>
+          </div>
+          <!-- Mobile menu button -->
+          <div class="md:hidden">
+            <button onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="p-2 rounded-md text-gray-500 hover:text-gray-700">
+              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Mobile menu -->
+      <div id="mobile-menu" class="hidden md:hidden border-t border-gray-200 bg-white px-4 py-2 space-y-1">
+        <a href="/" class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">Overview</a>
+        <a href="/proceedings" class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">Proceedings</a>
+        <a href="/deadlines" class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">Deadlines</a>
+        <a href="/demands" class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">Demands</a>
+        <a href="/clients" class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">Clients</a>
+        <a href="/sync-log" class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-50">Sync Log</a>
+      </div>
+    </nav>
+
+    <!-- Page content -->
+    <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-gray-200 bg-white mt-12">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 text-center text-xs text-gray-400">
+        IT Demand Dashboard &middot; Built from Blueprint v3
+      </div>
+    </footer>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
