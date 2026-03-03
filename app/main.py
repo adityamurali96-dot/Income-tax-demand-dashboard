@@ -6,6 +6,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, text
 
+from contextlib import asynccontextmanager
+
 from app.config import APP_TITLE
 from app.database import engine, Base, get_db
 from app.models import Client, Proceeding, Demand, SyncLog, NoticeFile, NoticeParsed
@@ -19,7 +21,16 @@ from datetime import date, timedelta
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title=APP_TITLE)
+
+@asynccontextmanager
+async def lifespan(app):
+    # Seed demo data on startup (idempotent — skips if data already exists)
+    from app.seed import seed
+    seed()
+    yield
+
+
+app = FastAPI(title=APP_TITLE, lifespan=lifespan)
 
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
