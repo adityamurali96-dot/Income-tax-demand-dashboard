@@ -3,7 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./portal.db")
+# Railway PostgreSQL addon exposes DATABASE_PRIVATE_URL for internal networking
+# (lower latency) and DATABASE_URL for external access.  Prefer the private URL
+# when available, then fall back to DATABASE_URL, then to local SQLite.
+DATABASE_URL = (
+    os.getenv("DATABASE_PRIVATE_URL")
+    or os.getenv("DATABASE_URL")
+    or "sqlite:///./portal.db"
+)
 
 # Railway provides PostgreSQL URLs starting with postgres:// but SQLAlchemy
 # requires postgresql://.  Fix transparently.
