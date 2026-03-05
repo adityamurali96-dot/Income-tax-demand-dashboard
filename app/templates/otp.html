@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OTP Verification — IT Demand Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 800:'#1e40af' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="h-full flex items-center justify-center">
+  <div class="w-full max-w-md px-6">
+    <!-- Logo -->
+    <div class="flex flex-col items-center mb-8">
+      <div class="h-14 w-14 rounded-xl bg-brand-600 flex items-center justify-center mb-4">
+        <span class="text-white font-bold text-xl">IT</span>
+      </div>
+      <h1 class="text-2xl font-bold text-gray-900">OTP Verification</h1>
+      <p class="text-sm text-gray-500 mt-1">{{ message or "Enter the OTP sent to your registered mobile/email" }}</p>
+    </div>
+
+    <!-- Error message -->
+    {% if error %}
+    <div class="mb-4 rounded-lg bg-red-50 border border-red-200 p-4">
+      <p class="text-sm text-red-700">{{ error }}</p>
+    </div>
+    {% endif %}
+
+    <!-- OTP form -->
+    <form method="POST" action="/verify-otp" class="bg-white rounded-xl shadow-sm border border-gray-200 p-8 space-y-5">
+      <div>
+        <label for="otp" class="block text-sm font-medium text-gray-700 mb-1">One-Time Password</label>
+        <input type="text" id="otp" name="otp" required
+               maxlength="6" pattern="[0-9]{6}"
+               placeholder="Enter 6-digit OTP"
+               autocomplete="one-time-code" inputmode="numeric"
+               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-center tracking-[0.5em] text-lg
+                      focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none
+                      placeholder:text-gray-400 placeholder:tracking-normal placeholder:text-sm">
+      </div>
+
+      <button type="submit"
+              class="w-full bg-brand-600 text-white py-2.5 px-4 rounded-lg text-sm font-medium
+                     hover:bg-brand-700 focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
+                     transition-colors">
+        Verify & Sync Data
+      </button>
+    </form>
+
+    <div class="text-center mt-4">
+      <a href="/login" class="text-sm text-brand-600 hover:text-brand-700">Back to Login</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Syncing Data — IT Demand Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eff6ff', 100:'#dbeafe', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 800:'#1e40af' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="h-full flex items-center justify-center">
+  <div class="w-full max-w-md px-6 text-center">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-10">
+      <!-- Spinner -->
+      <div class="flex justify-center mb-6">
+        <svg class="animate-spin h-12 w-12 text-brand-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+      </div>
+      <h2 class="text-xl font-bold text-gray-900 mb-2">Syncing Portal Data</h2>
+      <p class="text-sm text-gray-500 mb-4">Extracting e-Proceedings and Outstanding Demands from incometax.gov.in</p>
+      <p class="text-xs text-gray-400">This may take 30-60 seconds. Please do not close this page.</p>
+    </div>
+  </div>
+  <script>
+    // Poll for sync completion
+    (function poll() {
+      fetch('/sync-status')
+        .then(r => r.json())
+        .then(data => {
+          if (data.status === 'done') {
+            window.location.href = '/?synced=1';
+          } else if (data.status === 'error') {
+            window.location.href = '/login?error=' + encodeURIComponent(data.message || 'Sync failed');
+          } else {
+            setTimeout(poll, 2000);
+          }
+        })
+        .catch(() => setTimeout(poll, 3000));
+    })();
+  </script>
+</body>
+</html>

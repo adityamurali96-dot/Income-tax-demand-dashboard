@@ -9,3 +9,5 @@ psycopg2-binary==2.9.10
 aiosqlite==0.20.0
 httpx==0.28.1
 openpyxl==3.1.5
+playwright==1.49.1
+itsdangerous==2.2.0

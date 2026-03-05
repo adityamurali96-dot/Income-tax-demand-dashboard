@@ -1,16 +1,19 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, Form
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, text
+from sqlalchemy import func
 
 from contextlib import asynccontextmanager
 
+import asyncio
 import logging
 
-from app.config import APP_TITLE
+from app.config import APP_TITLE, SECRET_KEY
 from app.database import engine, Base, get_db
 from app.models import Client, Proceeding, Demand, SyncLog, NoticeFile, NoticeParsed
 from app.api import router as api_router
@@ -20,25 +23,35 @@ from datetime import date, timedelta
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Global scraper state (per-process, single-user design)
+# ---------------------------------------------------------------------------
+_scraper = None
+_sync_status = {"status": "idle", "message": ""}
+
+
+# ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 
-
 @asynccontextmanager
 async def lifespan(app):
-    # Create tables and seed demo data on startup.
-    # Wrapped in try/except so the app still starts (and serves /health)
-    # even if the database isn't ready yet.
+    # Create tables on startup (no demo seed)
     try:
         Base.metadata.create_all(bind=engine)
-        from app.seed import seed
-        seed()
     except Exception:
-        logger.exception("Database initialisation failed — app will start without data")
+        logger.exception("Database initialisation failed")
     yield
+    # Cleanup scraper on shutdown
+    global _scraper
+    if _scraper:
+        try:
+            await _scraper.close()
+        except Exception:
+            pass
 
 
 app = FastAPI(title=APP_TITLE, lifespan=lifespan)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -52,17 +65,16 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def _format_inr(value) -> str:
     """Format a number in Indian numbering system (e.g. 12,34,567)."""
     if value is None:
-        return "—"
+        return "\u2014"
     value = float(value)
     if value < 0:
         return f"-{_format_inr(-value)}"
     s = f"{value:,.2f}"
-    # Convert international format to Indian: 1,234,567.00 -> 12,34,567.00
     parts = s.split(".")
     integer_part = parts[0].replace(",", "")
     decimal_part = parts[1] if len(parts) > 1 else "00"
     if len(integer_part) <= 3:
-        return f"₹{integer_part}.{decimal_part}"
+        return f"\u20b9{integer_part}.{decimal_part}"
     last3 = integer_part[-3:]
     remaining = integer_part[:-3]
     groups = []
@@ -70,7 +82,7 @@ def _format_inr(value) -> str:
         groups.insert(0, remaining[-2:])
         remaining = remaining[:-2]
     formatted = ",".join(groups) + "," + last3
-    return f"₹{formatted}.{decimal_part}"
+    return f"\u20b9{formatted}.{decimal_part}"
 
 
 templates.env.filters["inr"] = _format_inr
@@ -78,7 +90,22 @@ templates.env.globals["today"] = date.today
 
 
 # ---------------------------------------------------------------------------
-# Health check (used by Railway to verify app readiness)
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def _is_logged_in(request: Request) -> bool:
+    return request.session.get("logged_in", False)
+
+
+def _require_login(request: Request):
+    """Redirect to login if not authenticated."""
+    if not _is_logged_in(request):
+        return RedirectResponse("/login", status_code=302)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Health check
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
@@ -87,12 +114,213 @@ def health_check():
 
 
 # ---------------------------------------------------------------------------
-# Dashboard pages
+# Login / OTP / Logout routes
+# ---------------------------------------------------------------------------
+
+@app.get("/login")
+def login_page(request: Request, error: str = ""):
+    if _is_logged_in(request):
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": error, "pan_value": ""},
+    )
+
+
+@app.post("/login")
+async def login_submit(request: Request, pan: str = Form(...), password: str = Form(...)):
+    global _scraper, _sync_status
+
+    pan = pan.upper().strip()
+
+    # Validate PAN format
+    import re
+    if not re.match(r"^[A-Z]{5}[0-9]{4}[A-Z]$", pan):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Invalid PAN format.", "pan_value": pan},
+        )
+
+    # Launch scraper and start login
+    from app.scraper import PortalScraper
+    if _scraper:
+        try:
+            await _scraper.close()
+        except Exception:
+            pass
+
+    _scraper = PortalScraper()
+    await _scraper.launch()
+
+    result = await _scraper.start_login(pan, password)
+
+    if result["status"] == "error":
+        await _scraper.close()
+        _scraper = None
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": result["message"], "pan_value": pan},
+        )
+
+    # Store PAN in session for later use
+    request.session["pan"] = pan
+    request.session["awaiting_otp"] = True
+
+    if result["status"] == "success":
+        # No OTP needed (rare), go straight to sync
+        request.session["logged_in"] = True
+        request.session["awaiting_otp"] = False
+        _sync_status = {"status": "running", "message": "Syncing..."}
+        asyncio.create_task(_run_sync(pan))
+        return RedirectResponse("/syncing", status_code=302)
+
+    # OTP required
+    return templates.TemplateResponse(
+        "otp.html",
+        {"request": request, "message": result["message"], "error": ""},
+    )
+
+
+@app.get("/verify-otp")
+def otp_page(request: Request):
+    if not request.session.get("awaiting_otp"):
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse(
+        "otp.html",
+        {"request": request, "message": "", "error": ""},
+    )
+
+
+@app.post("/verify-otp")
+async def otp_submit(request: Request, otp: str = Form(...), db: Session = Depends(get_db)):
+    global _scraper, _sync_status
+
+    if not _scraper:
+        return RedirectResponse("/login", status_code=302)
+
+    result = await _scraper.submit_otp(otp)
+
+    if result["status"] == "error":
+        return templates.TemplateResponse(
+            "otp.html",
+            {"request": request, "message": "", "error": result["message"]},
+        )
+
+    # Login successful
+    pan = request.session.get("pan", "")
+    request.session["logged_in"] = True
+    request.session["awaiting_otp"] = False
+
+    # Start background sync
+    _sync_status = {"status": "running", "message": "Syncing..."}
+    asyncio.create_task(_run_sync(pan))
+
+    return RedirectResponse("/syncing", status_code=302)
+
+
+@app.get("/syncing")
+def syncing_page(request: Request):
+    if not _is_logged_in(request):
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("syncing.html", {"request": request})
+
+
+@app.get("/sync-status")
+def sync_status_endpoint():
+    return JSONResponse(_sync_status)
+
+
+@app.post("/sync-now")
+async def sync_now(request: Request):
+    """Manual re-sync trigger."""
+    global _sync_status
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
+    pan = request.session.get("pan", "")
+    if not pan:
+        return RedirectResponse("/login", status_code=302)
+
+    if _sync_status.get("status") == "running":
+        return RedirectResponse("/syncing", status_code=302)
+
+    _sync_status = {"status": "running", "message": "Re-syncing..."}
+    asyncio.create_task(_run_sync(pan))
+    return RedirectResponse("/syncing", status_code=302)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    global _scraper
+    if _scraper:
+        try:
+            await _scraper.close()
+        except Exception:
+            pass
+        _scraper = None
+    request.session.clear()
+    return RedirectResponse("/login", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Background sync task
+# ---------------------------------------------------------------------------
+
+async def _run_sync(pan: str):
+    """Run the scraper and save data — called as a background task."""
+    global _scraper, _sync_status
+    from app.scraper import save_scraped_data
+    from app.database import SessionLocal
+
+    try:
+        if not _scraper:
+            _sync_status = {"status": "error", "message": "No active browser session."}
+            return
+
+        scraped = await _scraper.scrape_all()
+
+        db = SessionLocal()
+        try:
+            stats = save_scraped_data(db, pan, scraped)
+            _sync_status = {
+                "status": "done",
+                "message": (
+                    f"Synced: {stats['proceedings_found']} proceedings "
+                    f"({stats['proceedings_new']} new), "
+                    f"{stats['demands_found']} demands "
+                    f"({stats['demands_new']} new)"
+                ),
+            }
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.exception("Sync failed")
+        _sync_status = {"status": "error", "message": str(e)}
+
+    finally:
+        # Close the scraper after sync
+        if _scraper:
+            try:
+                await _scraper.close()
+            except Exception:
+                pass
+            _scraper = None
+
+
+# ---------------------------------------------------------------------------
+# Dashboard pages (all require login)
 # ---------------------------------------------------------------------------
 
 @app.get("/")
-def dashboard_home(request: Request, db: Session = Depends(get_db)):
-    """Overview dashboard with key metrics and charts."""
+def dashboard_home(request: Request, db: Session = Depends(get_db), synced: str = ""):
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
+    pan = request.session.get("pan", "")
+
     total_clients = db.query(func.count(Client.pan)).scalar() or 0
     total_proceedings = db.query(func.count(Proceeding.id)).scalar() or 0
     pending_proceedings = (
@@ -160,10 +388,10 @@ def dashboard_home(request: Request, db: Session = Depends(get_db)):
     type_labels = [r[0] for r in type_dist]
     type_counts = [r[1] for r in type_dist]
 
-    # Recent activity — last 10 sync logs
+    # Recent activity
     recent_syncs = db.query(SyncLog).order_by(SyncLog.completed_at.desc()).limit(10).all()
 
-    # Upcoming deadlines — next 5
+    # Upcoming deadlines
     upcoming = (
         db.query(Proceeding)
         .filter(Proceeding.status == "pending", Proceeding.response_due_date >= date.today())
@@ -172,11 +400,14 @@ def dashboard_home(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
+    sync_message = _sync_status.get("message", "") if synced else ""
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
             "title": APP_TITLE,
+            "pan": pan,
             "total_clients": total_clients,
             "total_proceedings": total_proceedings,
             "pending_proceedings": pending_proceedings,
@@ -192,6 +423,7 @@ def dashboard_home(request: Request, db: Session = Depends(get_db)):
             "type_counts": type_counts,
             "recent_syncs": recent_syncs,
             "upcoming": upcoming,
+            "sync_message": sync_message,
         },
     )
 
@@ -205,7 +437,10 @@ def proceedings_page(
     pan: str = "",
     sort: str = "due_date",
 ):
-    """All proceedings — filterable, sortable."""
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
     q = db.query(Proceeding).join(Client)
 
     if status:
@@ -226,7 +461,6 @@ def proceedings_page(
 
     proceedings = q.all()
 
-    # Get unique AYs and statuses for filter dropdowns
     all_ays = [r[0] for r in db.query(Proceeding.assessment_year).distinct().order_by(Proceeding.assessment_year.desc()).all()]
     all_statuses = [r[0] for r in db.query(Proceeding.status).distinct().all()]
 
@@ -248,7 +482,10 @@ def proceedings_page(
 
 @app.get("/deadlines")
 def deadlines_page(request: Request, db: Session = Depends(get_db)):
-    """Upcoming deadlines sorted by due date."""
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
     overdue = (
         db.query(Proceeding)
         .join(Client)
@@ -286,7 +523,10 @@ def demands_page(
     ay: str = "",
     sort: str = "amount_desc",
 ):
-    """Outstanding demands sorted by total amount."""
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
     q = db.query(Demand).join(Client)
 
     if status:
@@ -325,7 +565,10 @@ def demands_page(
 
 @app.get("/clients")
 def clients_page(request: Request, db: Session = Depends(get_db)):
-    """Client list grouped with summary stats."""
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
     clients = db.query(Client).order_by(Client.name).all()
     return templates.TemplateResponse(
         "clients.html",
@@ -335,7 +578,10 @@ def clients_page(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/clients/{pan}")
 def client_detail(pan: str, request: Request, db: Session = Depends(get_db)):
-    """Detail view for a single client."""
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
     client = db.query(Client).filter(Client.pan == pan).first()
     if not client:
         return templates.TemplateResponse(
@@ -375,7 +621,10 @@ def client_detail(pan: str, request: Request, db: Session = Depends(get_db)):
 
 @app.get("/sync-log")
 def sync_log_page(request: Request, db: Session = Depends(get_db)):
-    """Sync log — history of data synchronization runs."""
+    redirect = _require_login(request)
+    if redirect:
+        return redirect
+
     logs = db.query(SyncLog).order_by(SyncLog.completed_at.desc()).all()
     return templates.TemplateResponse(
         "sync_log.html",
