@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 
-# Install system dependencies required by Playwright/Chromium
+# Install system dependencies required by Playwright/Chromium and Xvfb
+# Xvfb provides a virtual display so Chromium can run in headed mode
+# (the Income Tax portal blocks headless browsers)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     ca-certificates \
@@ -26,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcursor1 \
     libxi6 \
     libxtst6 \
+    xvfb \
+    x11-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
