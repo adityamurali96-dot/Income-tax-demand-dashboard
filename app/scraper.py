@@ -66,6 +66,34 @@ async def _wait_for_any_selector(page, selectors: list[str], timeout: int = ELEM
     return None
 
 
+async def _click_first_enabled_selector(
+    page,
+    selectors: list[str],
+    timeout: int = ELEMENT_WAIT_TIMEOUT,
+    retries: int = 10,
+):
+    """Click the first matching selector once it becomes enabled.
+
+    On the IT portal, Angular often renders the button quickly but keeps it
+    disabled until form validation and blur events complete. This helper waits
+    for visibility and retries until a control is actually enabled.
+    """
+    btn = await _wait_for_any_selector(page, selectors, timeout=timeout)
+    if not btn:
+        return False
+
+    for _ in range(retries):
+        try:
+            if await btn.is_enabled():
+                await btn.click()
+                return True
+        except Exception:
+            pass
+        await _delay(0.5)
+
+    return False
+
+
 class PortalScraper:
     """Manages a Playwright browser session against the IT portal."""
 
@@ -234,6 +262,8 @@ class PortalScraper:
             await pan_input.click()
             await pan_input.fill("")
             await pan_input.type(self._pan, delay=50)
+            # Trigger blur to allow Angular form validators to enable Continue.
+            await pan_input.press("Tab")
             await _delay(1)
             logger.info("PAN entered")
 
@@ -244,11 +274,20 @@ class PortalScraper:
                 'button[type="submit"]',
                 'input[type="submit"]',
             ]
-            continue_btn = await _wait_for_any_selector(page, CONTINUE_SELECTORS, timeout=10000)
-            if continue_btn:
-                await continue_btn.click()
+            clicked_continue = await _click_first_enabled_selector(
+                page,
+                CONTINUE_SELECTORS,
+                timeout=10000,
+                retries=20,
+            )
+            if clicked_continue:
                 await _delay(3)
                 logger.info("Clicked Continue after PAN")
+            else:
+                return {
+                    "status": "error",
+                    "message": "Login failed: Continue button stayed disabled after entering PAN.",
+                }
 
             # --- Step 5: Wait for password field (Angular re-renders the form) ---
             PASSWORD_SELECTORS = [
@@ -278,6 +317,7 @@ class PortalScraper:
             await pwd_input.click()
             await pwd_input.fill("")
             await pwd_input.type(password, delay=30)
+            await pwd_input.press("Tab")
             await _delay(1)
             logger.info("Password entered")
 
@@ -289,11 +329,20 @@ class PortalScraper:
                 'button:has-text("LOGIN")',
                 'button[type="submit"]',
             ]
-            login_btn = await _wait_for_any_selector(page, LOGIN_BTN_SELECTORS, timeout=10000)
-            if login_btn:
-                await login_btn.click()
+            clicked_login = await _click_first_enabled_selector(
+                page,
+                LOGIN_BTN_SELECTORS,
+                timeout=10000,
+                retries=20,
+            )
+            if clicked_login:
                 await _delay(4)
                 logger.info("Clicked Login/Continue")
+            else:
+                return {
+                    "status": "error",
+                    "message": "Login failed: Login/Continue button stayed disabled after entering password.",
+                }
 
             # --- Step 8: Check for error messages ---
             error_el = page.locator(
