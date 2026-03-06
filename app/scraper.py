@@ -11,6 +11,8 @@ Uses headed browser mode with deliberate delays to avoid detection.
 import asyncio
 import json
 import logging
+import os
+import subprocess
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -80,22 +82,78 @@ class PortalScraper:
     # ------------------------------------------------------------------
 
     async def launch(self):
-        """Start the browser."""
+        """Start the browser in headed mode with a virtual display.
+
+        The Income Tax portal detects and blocks headless browsers.
+        We run Chromium in headed mode against an Xvfb virtual framebuffer
+        so it behaves like a real desktop browser, even on a headless server.
+        """
+        # Start Xvfb virtual display if no display is available
+        self._ensure_virtual_display()
+
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
+            headless=False,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--window-size=1280,800",
+            ],
         )
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
+                "Chrome/131.0.0.0 Safari/537.36"
             ),
         )
+
+        # Remove the webdriver flag that sites use to detect automation
+        await self._context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        """)
+
         self._page = await self._context.new_page()
-        logger.info("Browser launched")
+        logger.info("Browser launched (headed mode with virtual display)")
+
+    def _ensure_virtual_display(self):
+        """Start Xvfb if DISPLAY is not set (headless server environment)."""
+        if os.environ.get("DISPLAY"):
+            logger.info("DISPLAY already set to %s", os.environ["DISPLAY"])
+            return
+
+        display_num = ":99"
+        try:
+            # Check if Xvfb is already running on :99
+            result = subprocess.run(
+                ["xdpyinfo", "-display", display_num],
+                capture_output=True, timeout=5,
+            )
+            if result.returncode == 0:
+                os.environ["DISPLAY"] = display_num
+                logger.info("Reusing existing Xvfb on %s", display_num)
+                return
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        try:
+            subprocess.Popen(
+                ["Xvfb", display_num, "-screen", "0", "1280x800x24", "-ac"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            os.environ["DISPLAY"] = display_num
+            # Give Xvfb a moment to start
+            time.sleep(1)
+            logger.info("Started Xvfb on %s", display_num)
+        except FileNotFoundError:
+            logger.warning(
+                "Xvfb not found — falling back to headless mode. "
+                "Install xvfb for headed browser support: apt-get install xvfb"
+            )
 
     async def close(self):
         """Shut down browser and Playwright."""
