@@ -31,9 +31,37 @@ COOKIE_DIR.mkdir(exist_ok=True)
 # Throttle between actions (seconds)
 ACTION_DELAY = 2.5
 
+# Timeout for waiting on Angular-rendered elements (ms)
+ELEMENT_WAIT_TIMEOUT = 60000
+# Timeout for page navigation (ms)
+NAV_TIMEOUT = 60000
+
 
 async def _delay(seconds: float = ACTION_DELAY):
     await asyncio.sleep(seconds)
+
+
+async def _wait_for_any_selector(page, selectors: list[str], timeout: int = ELEMENT_WAIT_TIMEOUT):
+    """
+    Wait for any one of the given selectors to become visible.
+    Returns the first matching locator, or None if none found.
+    This is essential for Angular SPAs where element IDs may vary
+    between portal deployments.
+    """
+    combined = ", ".join(selectors)
+    try:
+        await page.wait_for_selector(combined, state="visible", timeout=timeout)
+    except Exception:
+        pass
+
+    for sel in selectors:
+        loc = page.locator(sel).first
+        try:
+            if await loc.is_visible():
+                return loc
+        except Exception:
+            continue
+    return None
 
 
 class PortalScraper:
@@ -93,6 +121,10 @@ class PortalScraper:
         """
         Navigate to login page, enter PAN + password, and submit.
         Returns a status dict indicating whether OTP is needed.
+
+        The Income Tax portal is an Angular SPA that renders dynamically.
+        We use domcontentloaded (not networkidle) for navigation and then
+        explicitly wait for Angular-rendered elements to appear.
         """
         self._pan = pan.upper().strip()
 
@@ -102,64 +134,134 @@ class PortalScraper:
         page = self._page
 
         try:
-            # Navigate to login
-            await page.goto(LOGIN_URL, wait_until="networkidle", timeout=30000)
-            await _delay(2)
+            # --- Step 1: Navigate to the portal login page ---
+            # Use domcontentloaded instead of networkidle because Angular
+            # SPAs keep making XHR calls that prevent networkidle from
+            # ever resolving, causing the timeout.
+            logger.info("Navigating to login page: %s", LOGIN_URL)
+            await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+            await _delay(3)
 
-            # Enter PAN
-            pan_input = page.locator('input[id="panAdhaarUserId"]').first
-            if not await pan_input.is_visible():
-                # Try alternate selectors
-                pan_input = page.locator('input[placeholder*="PAN"]').first
-            if not await pan_input.is_visible():
-                pan_input = page.locator('input[type="text"]').first
+            # --- Step 2: Wait for Angular to render the PAN input ---
+            # The portal may use different selectors across deployments,
+            # so we try multiple known patterns.
+            PAN_SELECTORS = [
+                'input[id="panAdhaarUserId"]',
+                'input[formcontrolname="panAdhaarUserId"]',
+                'input[placeholder*="User ID"]',
+                'input[placeholder*="PAN"]',
+                'input[name*="pan"]',
+                'input[name*="userId"]',
+            ]
+            logger.info("Waiting for PAN input field to render...")
+            pan_input = await _wait_for_any_selector(page, PAN_SELECTORS)
 
+            if not pan_input:
+                # Last-resort fallback: first visible text input on the page
+                logger.warning("Primary PAN selectors not found, using fallback")
+                fallback = page.locator('input[type="text"]').first
+                try:
+                    await fallback.wait_for(state="visible", timeout=30000)
+                    pan_input = fallback
+                except Exception:
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Login failed: Could not find the PAN/User ID input field. "
+                            "The Income Tax portal may be down or its UI has changed."
+                        ),
+                    }
+
+            # --- Step 3: Enter PAN ---
             await pan_input.click()
             await pan_input.fill("")
             await pan_input.type(self._pan, delay=50)
             await _delay(1)
+            logger.info("PAN entered")
 
-            # Click Continue button after PAN entry
-            continue_btn = page.locator('button:has-text("Continue")').first
-            if await continue_btn.is_visible():
+            # --- Step 4: Click Continue after PAN entry ---
+            CONTINUE_SELECTORS = [
+                'button:has-text("Continue")',
+                'button:has-text("CONTINUE")',
+                'button[type="submit"]',
+                'input[type="submit"]',
+            ]
+            continue_btn = await _wait_for_any_selector(page, CONTINUE_SELECTORS, timeout=10000)
+            if continue_btn:
                 await continue_btn.click()
-                await _delay(2)
+                await _delay(3)
+                logger.info("Clicked Continue after PAN")
 
-            # Wait for password field to appear
-            await page.wait_for_selector(
-                'input[type="password"]', timeout=15000
-            )
+            # --- Step 5: Wait for password field (Angular re-renders the form) ---
+            PASSWORD_SELECTORS = [
+                'input[type="password"]',
+                'input[formcontrolname="password"]',
+                'input[placeholder*="Password"]',
+                'input[placeholder*="password"]',
+            ]
+            pwd_input = await _wait_for_any_selector(page, PASSWORD_SELECTORS, timeout=30000)
+            if not pwd_input:
+                # Check if there was a validation error on PAN
+                error_el = page.locator(
+                    '.error-message, .alert-danger, [class*="error"], .mat-error'
+                ).first
+                try:
+                    if await error_el.is_visible():
+                        error_text = await error_el.text_content()
+                        return {"status": "error", "message": f"PAN validation error: {error_text.strip()}"}
+                except Exception:
+                    pass
+                return {
+                    "status": "error",
+                    "message": "Login failed: Password field did not appear. PAN may be invalid.",
+                }
 
-            # Enter password
-            pwd_input = page.locator('input[type="password"]').first
+            # --- Step 6: Enter password ---
             await pwd_input.click()
             await pwd_input.fill("")
             await pwd_input.type(password, delay=30)
             await _delay(1)
+            logger.info("Password entered")
 
-            # Click Continue/Login button
-            login_btn = page.locator('button:has-text("Continue")').first
-            if not await login_btn.is_visible():
-                login_btn = page.locator('button:has-text("Login")').first
-            await login_btn.click()
-            await _delay(3)
+            # --- Step 7: Click Continue/Login to submit credentials ---
+            LOGIN_BTN_SELECTORS = [
+                'button:has-text("Continue")',
+                'button:has-text("CONTINUE")',
+                'button:has-text("Login")',
+                'button:has-text("LOGIN")',
+                'button[type="submit"]',
+            ]
+            login_btn = await _wait_for_any_selector(page, LOGIN_BTN_SELECTORS, timeout=10000)
+            if login_btn:
+                await login_btn.click()
+                await _delay(4)
+                logger.info("Clicked Login/Continue")
 
-            # Check for errors
-            error_el = page.locator('.error-message, .alert-danger, [class*="error"]').first
-            if await error_el.is_visible():
-                error_text = await error_el.text_content()
-                return {"status": "error", "message": error_text.strip()}
-
-            # Check if OTP input appeared
-            otp_input = page.locator('input[id*="otp"], input[placeholder*="OTP"], input[name*="otp"]').first
+            # --- Step 8: Check for error messages ---
+            error_el = page.locator(
+                '.error-message, .alert-danger, [class*="error"], .mat-error, .toast-error'
+            ).first
             try:
-                await otp_input.wait_for(timeout=10000)
-                return {"status": "otp_required", "message": "OTP sent to your registered mobile/email."}
+                if await error_el.is_visible():
+                    error_text = await error_el.text_content()
+                    if error_text and error_text.strip():
+                        return {"status": "error", "message": error_text.strip()}
             except Exception:
-                # Maybe already logged in or different flow
                 pass
 
-            # Check if we landed on dashboard (already logged in)
+            # --- Step 9: Check if OTP input appeared ---
+            OTP_SELECTORS = [
+                'input[id*="otp"]',
+                'input[placeholder*="OTP"]',
+                'input[name*="otp"]',
+                'input[formcontrolname*="otp"]',
+                'input[placeholder*="verification"]',
+            ]
+            otp_input = await _wait_for_any_selector(page, OTP_SELECTORS, timeout=15000)
+            if otp_input:
+                return {"status": "otp_required", "message": "OTP sent to your registered mobile/email."}
+
+            # --- Step 10: Check if already on dashboard ---
             if "dashboard" in page.url.lower():
                 self._logged_in = True
                 return {"status": "success", "message": "Logged in successfully."}
@@ -178,10 +280,22 @@ class PortalScraper:
         page = self._page
 
         try:
-            # Find OTP input
-            otp_input = page.locator('input[id*="otp"], input[placeholder*="OTP"], input[name*="otp"]').first
-            if not await otp_input.is_visible():
+            # Find OTP input using multiple selector strategies
+            OTP_SELECTORS = [
+                'input[id*="otp"]',
+                'input[placeholder*="OTP"]',
+                'input[name*="otp"]',
+                'input[formcontrolname*="otp"]',
+                'input[placeholder*="verification"]',
+            ]
+            otp_input = await _wait_for_any_selector(page, OTP_SELECTORS, timeout=15000)
+            if not otp_input:
+                # Fallback to first visible text input
                 otp_input = page.locator('input[type="text"]').first
+                try:
+                    await otp_input.wait_for(state="visible", timeout=10000)
+                except Exception:
+                    return {"status": "error", "message": "Could not find OTP input field."}
 
             await otp_input.click()
             await otp_input.fill("")
@@ -189,20 +303,34 @@ class PortalScraper:
             await _delay(1)
 
             # Submit OTP
-            submit_btn = page.locator('button:has-text("Continue"), button:has-text("Validate"), button:has-text("Submit")').first
-            await submit_btn.click()
-            await _delay(5)
+            SUBMIT_SELECTORS = [
+                'button:has-text("Continue")',
+                'button:has-text("CONTINUE")',
+                'button:has-text("Validate")',
+                'button:has-text("Submit")',
+                'button:has-text("SUBMIT")',
+                'button[type="submit"]',
+            ]
+            submit_btn = await _wait_for_any_selector(page, SUBMIT_SELECTORS, timeout=10000)
+            if submit_btn:
+                await submit_btn.click()
+                await _delay(5)
 
             # Check for errors
-            error_el = page.locator('.error-message, .alert-danger, [class*="error"]').first
-            if await error_el.is_visible():
-                error_text = await error_el.text_content()
-                if error_text and error_text.strip():
-                    return {"status": "error", "message": error_text.strip()}
+            error_el = page.locator(
+                '.error-message, .alert-danger, [class*="error"], .mat-error, .toast-error'
+            ).first
+            try:
+                if await error_el.is_visible():
+                    error_text = await error_el.text_content()
+                    if error_text and error_text.strip():
+                        return {"status": "error", "message": error_text.strip()}
+            except Exception:
+                pass
 
             # Check if dashboard loaded
             try:
-                await page.wait_for_url("**/dashboard**", timeout=15000)
+                await page.wait_for_url("**/dashboard**", timeout=20000)
                 self._logged_in = True
                 return {"status": "success", "message": "Logged in successfully."}
             except Exception:
@@ -232,7 +360,7 @@ class PortalScraper:
         results = []
 
         try:
-            await page.goto(EPROCEEDINGS_URL, wait_until="networkidle", timeout=30000)
+            await page.goto(EPROCEEDINGS_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
             await _delay(3)
 
             # Wait for the proceedings table to load
@@ -284,7 +412,7 @@ class PortalScraper:
         results = []
 
         try:
-            await page.goto(DEMANDS_URL, wait_until="networkidle", timeout=30000)
+            await page.goto(DEMANDS_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
             await _delay(3)
 
             # Wait for demands table
